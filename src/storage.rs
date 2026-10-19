@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, String, Vec};
+use soroban_sdk::{contracttype, Address, String, Vec, Env, Symbol, symbol_short};
 
 /// Storage keys for all persistent and instance state in the vault.
 ///
@@ -762,6 +762,33 @@ pub enum RoundingPolicy {
     Ceiling,
     Nearest,
 }
+// ── Issue #220: rounding dust handling ────────────────────────────────────────
+
+use crate::errors::VaultSafetyError;
+
+/// Storage key for accumulated rounding dust (issue #220).
+pub const ROUNDING_DUST_KEY: Symbol = symbol_short!("rounding_dust");
+
+/// Retrieve the current rounding dust amount (0 if none).
+pub fn get_rounding_dust(env: &Env) -> i128 {
+    env.storage().instance().get(&ROUNDING_DUST_KEY).unwrap_or(0)
+}
+
+/// Add amount to rounding dust counter (checked arithmetic).
+pub fn add_rounding_dust(env: &Env, amount: i128) -> Result<(), VaultSafetyError> {
+    let cur = get_rounding_dust(env);
+    let new = cur.checked_add(amount).ok_or(VaultSafetyError::ArithmeticError)?;
+    env.storage().instance().set(&ROUNDING_DUST_KEY, &new);
+    Ok(())
+}
+
+/// Sweep accumulated rounding dust into reward pool, clearing the counter.
+pub fn sweep_rounding_dust(env: &Env) -> Result<i128, VaultSafetyError> {
+    let dust = get_rounding_dust(env);
+    env.storage().instance().remove(&ROUNDING_DUST_KEY);
+    Ok(dust)
+}
+
 
 // ── Issue #216: governance voting ────────────────────────────────────────────
 
