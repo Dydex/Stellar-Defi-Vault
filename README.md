@@ -149,9 +149,11 @@ cargo clippy --features testutils -- -D warnings
 Quality tooling complements the test suite; each has a doc and a `make` target:
 
 ```bash
-make coverage   # line coverage summary (cargo-llvm-cov)   — docs/COVERAGE.md
-make scout      # Scout static analysis (Soroban)          — docs/STATIC_ANALYSIS.md
-make mutants    # mutation testing of the accounting core  — docs/MUTATION_TESTING.md
+make coverage              # line coverage summary (cargo-llvm-cov)   — docs/COVERAGE.md
+make scout                 # Scout static analysis (Soroban)          — docs/STATIC_ANALYSIS.md
+make mutants                # mutation testing of the accounting core  — docs/MUTATION_TESTING.md
+make interface-spec-check  # fail if the public interface drifted     — docs/INTERFACE_SPEC.md
+make interface-spec        # regenerate the committed snapshot        — docs/INTERFACE_SPEC.md
 ```
 
 - [docs/COVERAGE.md](docs/COVERAGE.md) — coverage on every PR, the no-regression
@@ -162,6 +164,12 @@ make mutants    # mutation testing of the accounting core  — docs/MUTATION_TES
   the baseline, and how survivors are triaged.
 - [docs/INVARIANTS.md](docs/INVARIANTS.md) — the precise accounting and
   share-price invariants that these tools protect, mapped to tests.
+- [docs/INTERFACE_SPEC.md](docs/INTERFACE_SPEC.md) — the committed public-interface
+  snapshot (`interface-spec/VaultContract.json`), generated from the real release
+  build so any change to an exported function's name, parameters, or types shows
+  up as a CI-failing diff instead of shipping silently; see
+  [CHANGELOG.md](CHANGELOG.md) for the entry an intentional change needs
+  alongside the refreshed snapshot.
 
 ### Deploying to Testnet
 
@@ -380,6 +388,100 @@ seed-2        GC3QSFHWDI7G3MFNCNTHAS3FCJ5KAJMJSAPLPGOMTAERFKNM77GSO737  25000000
 run; the deposit/shares columns are illustrative, since reproducing them
 needs a deployed vault contract ID.)
 
+## Pool Health Dashboard Endpoint
+
+[`scripts/pool-status.ts`](./scripts/pool-status.ts) polls the vault's
+read-only functions (TVL, reward rate, reward pool balance, projected
+runway, pause state) and prints a single JSON document to stdout —
+suitable for a status page, or as a monitoring check in its own right:
+it exits non-zero when a configured alert threshold is breached (low
+runway, or the pool being paused).
+
+```bash
+CONTRACT_ID=C... IDENTITY=alice npx tsx scripts/pool-status.ts
+```
+
+```json
+{
+  "timestamp": "2026-10-20T00:00:00.000Z",
+  "network": "testnet",
+  "contractId": "C...",
+  "decimals": 7,
+  "tvl": 1000000,
+  "tvlRaw": "10000000000000",
+  "rateBps": 500,
+  "rewardPoolBalance": 50000,
+  "rewardPoolBalanceRaw": "500000000000",
+  "projectedRunwayLedgers": 980000,
+  "paused": false,
+  "alerts": [],
+  "ok": true
+}
+```
+
+(Shape and field names above are illustrative — reproducing real values
+needs an actual deployed vault contract. The argument parsing, help
+text, and error/exit-code paths were verified against the real Stellar
+CLI on testnet while writing this script; a successful fetch against a
+live vault was not, since that needs a deployed contract.)
+
+Mainnet has no default RPC endpoint in the Stellar CLI ("Bring Your
+Own"), so point at your own provider explicitly:
+
+```bash
+CONTRACT_ID=C... IDENTITY=ops npx tsx scripts/pool-status.ts \
+  --network mainnet \
+  --rpc-url https://your-mainnet-rpc-provider.example \
+  --network-passphrase "Public Global Stellar Network ; September 2015"
+```
+
+Run `npx tsx scripts/pool-status.ts --help` for every option, including
+`--min-runway-ledgers` and `--no-alert-on-pause`.
+
+### Cron usage
+
+```cron
+# Every 15 minutes, append a status line and alert (via the shell's own
+# mailing, or swap the `||` branch for your paging tool) on exit code 1
+# or 2.
+*/15 * * * * CONTRACT_ID=C... IDENTITY=alice npx tsx /path/to/scripts/pool-status.ts >> /var/log/pool-status.jsonl || echo "pool-status alert: see /var/log/pool-status.jsonl" | mail -s "Vault alert" ops@example.com
+```
+
+### CI usage (GitHub Actions)
+
+```yaml
+name: Pool health check
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+jobs:
+  pool-status:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Stellar CLI
+        run: cargo install --locked stellar-cli
+      - name: Poll pool status
+        env:
+          CONTRACT_ID: ${{ secrets.VAULT_CONTRACT_ID }}
+          IDENTITY: ${{ secrets.VAULT_MONITOR_IDENTITY }}
+          NETWORK: mainnet
+          RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+          NETWORK_PASSPHRASE: "Public Global Stellar Network ; September 2015"
+        run: npx tsx scripts/pool-status.ts | tee pool-status.json
+      # A non-zero exit above (alert breached, or fetch failure) fails
+      # this step and the workflow run, which is itself the alert signal
+      # most CI-based paging integrations watch for.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pool-status
+          path: pool-status.json
+```
+
 ## Events
 
 Every emitted event indexes an event-type symbol in topic 0 and its primary
@@ -444,8 +546,12 @@ See [docs/SECURITY.md](./docs/SECURITY.md) for the full security model, includin
 - What the admin can and cannot do (the admin **cannot** access user principal)
 - Failure scenarios: paused vault, halted yield, key compromise
 - Admin key rotation procedure via `transfer_admin`
+- Vulnerability disclosure policy: private reporting channel, response SLA,
+  scope, severity levels, and (currently unfunded) bounty terms
 
-This contract is unaudited. Do not use in production without an independent security audit. If you find a vulnerability, please open a private [GitHub Security Advisory](../../security/advisories/new) rather than a public issue.
+This contract is unaudited. Do not use in production without an independent security audit. If you find a vulnerability, please report it privately via a [GitHub Security Advisory](../../security/advisories/new) rather than a public issue — see [docs/SECURITY.md](./docs/SECURITY.md#vulnerability-disclosure-policy) for the full policy, or [.github/SECURITY.md](./.github/SECURITY.md) for GitHub's own security tab.
+
+See [docs/AUDIT_READINESS.md](./docs/AUDIT_READINESS.md) for the checklist this project works through before engaging an external auditor, and for the defined commit/tag an audit is actually scoped against once one is underway.
 
 ## Known Limitations & Remediations
 
