@@ -160,3 +160,5 @@ pub mod fuzz_support {
     pub use crate::balance::{amount_to_shares_with_decimals, shares_to_amount_with_decimals};
     pub use crate::reward_math::reward_for_ledgers;
 }
+#[cfg(test)]
+mod test_resource_costs;

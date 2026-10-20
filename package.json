@@ -1,0 +1,15 @@
+{
+  "name": "stellar-defi-vault-operator-tools",
+  "private": true,
+  "scripts": {
+    "watch-events": "tsx scripts/watch-events.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^14.3.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
