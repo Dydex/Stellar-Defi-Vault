@@ -162,3 +162,6 @@ pub mod fuzz_support {
 }
 #[cfg(test)]
 mod test_resource_costs;
+
+#[cfg(test)]
+mod test_runbook_interface_snapshot;

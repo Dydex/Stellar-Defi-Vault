@@ -208,6 +208,17 @@ Emitted when `set_circuit_breaker_threshold_bps` changes the configured
 single-withdrawal threshold. This reports configuration, not a circuit-breaker
 trip.
 
+### Fee-change notice events
+
+The global unstake-fee notice mechanism emits these events:
+
+| Topic | Data | Meaning |
+|-------|------|---------|
+| `fee_set` | `(new_bps: u32, ledger: u32)` | Fee decrease or immediate fee update applied |
+| `fee_queued` | `(new_bps: u32, effective_at: u32, ledger: u32)` | Fee increase queued for its notice period |
+| `fee_apld` | `(new_bps: u32, ledger: u32)` | Queued fee increase applied |
+| `fn_cfg` | `(notice_ledgers: u32, ledger: u32)` | Fee-notice delay configuration changed |
+
 ## Operator event watcher
 
 [`scripts/watch-events.ts`](../scripts/watch-events.ts) polls the Stellar RPC
@@ -216,7 +227,7 @@ It prints alerts to stdout and optionally sends Slack/Discord-compatible
 webhooks.
 
 ```powershell
-npm ci
+npm install
 $env:RPC_URL = "https://your-stellar-rpc.example"
 $env:CONTRACT_ID = "C..."
 $env:START_LEDGER = "123456" # required only on the first run
@@ -233,12 +244,32 @@ file on durable storage and restrict its permissions. Delivery is at-least-once:
 a webhook failure retains the event cursor for retry, so a previously printed
 stdout alert may appear again.
 
-For a small service, run `npm ci` in a private operator directory and supervise
+For a small service, run `npm install` in a private operator directory and supervise
 `npm run watch-events` with systemd, a container restart policy, or an
 equivalent service manager. Inject `RPC_URL`, `CONTRACT_ID`, and `WEBHOOK_URL`
 from the service's secret/config manager; mount the cursor path on persistent
 storage. Do not use a cron job that starts a second watcher while the first is
 still running.
+
+Example systemd unit (store the environment file outside the repository with
+operator-only permissions):
+
+```ini
+[Unit]
+Description=Stellar vault event watcher
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/stellar-defi-vault
+EnvironmentFile=/etc/stellar-vault-watcher.env
+ExecStart=/usr/bin/npm run watch-events
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
 
 The watcher supports `cb_trip` events and alerts on `cb_set` threshold changes.
 The current circuit breaker only emits `cb_set` configuration events; a failed
@@ -246,9 +277,10 @@ withdrawal reverts its transaction, so an event-only watcher cannot reliably
 observe or classify an actual breaker trip. Monitor failed transaction results
 separately until the contract exposes a durable trip signal.
 
-The existing fee events include per-token `token_fee_set`; not every fee
-configuration path emits a dedicated event. Keep off-chain monitoring of admin
-transactions in addition to this event watcher.
+Global and per-token fee changes emit `fee_set`, `fee_queued`, `fee_apld`, or
+`token_fee_set` events. Other fee-related configuration paths may not have a
+dedicated event; keep off-chain monitoring of admin transactions in addition
+to this event watcher.
 
 ### Pool-wide event topics
 

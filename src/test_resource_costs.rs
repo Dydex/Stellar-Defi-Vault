@@ -4,11 +4,10 @@ extern crate std;
 
 use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
-    token, Address, Env, String,
+    token, Address, Env,
 };
 
 use crate::{
-    storage::PauseReason,
     vault::{VaultContract, VaultContractClient},
 };
 
@@ -19,7 +18,6 @@ struct Fixture<'a> {
     env: Env,
     vault: VaultContractClient<'a>,
     token_admin: token::StellarAssetClient<'a>,
-    admin: Address,
     users: std::vec::Vec<Address>,
 }
 
@@ -55,7 +53,7 @@ impl<'a> Fixture<'a> {
             let user = Address::generate(&env);
             token_admin.mint(&user, &1_000);
             env.budget().reset_unlimited();
-            vault.stake(&user, &1_000, &0);
+            vault.stake(&user, &1_000);
             users.push(user);
         }
 
@@ -63,7 +61,6 @@ impl<'a> Fixture<'a> {
             env,
             vault,
             token_admin,
-            admin,
             users,
         }
     }
@@ -83,22 +80,19 @@ impl<'a> Fixture<'a> {
         let depositor = Address::generate(&self.env);
         self.token_admin.mint(&depositor, &1_000);
         let deposit = self.measure("deposit", depositors, || {
-            self.vault.deposit(&depositor, &1_000, &None).unwrap();
+            self.vault.deposit(&depositor, &1_000, &None);
         });
 
         let user = &self.users[0];
         let withdraw = self.measure("withdraw", depositors, || {
-            self.vault.withdraw(user, &1).unwrap();
+            self.vault.withdraw(user, &1);
         });
         let claim = self.measure("claim", depositors, || {
-            self.vault.claim(user).unwrap();
+            self.vault.claim(user);
         });
 
-        self.vault
-            .pause(&PauseReason::SecurityIncident, &String::from_str(&self.env, "resource measurement"))
-            .unwrap();
         let exit = self.measure("exit", depositors, || {
-            self.vault.emergency_withdraw(user).unwrap();
+            self.vault.unstake_all(user);
         });
 
         std::vec![deposit, withdraw, claim, exit]

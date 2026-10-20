@@ -62,6 +62,8 @@ high-impact admin transactions where signer policy permits.
 The function names below are the deployed vault entrypoints in
 [`src/vault.rs`](../src/vault.rs) and its extension modules. Check the deployed
 WASM/interface for the specific contract before submitting any transaction.
+The compile-time entrypoint snapshot for the runbook is
+[`src/test_runbook_interface_snapshot.rs`](../src/test_runbook_interface_snapshot.rs).
 
 ### Suspected exploit or unexplained outflow
 
@@ -153,24 +155,29 @@ WASM/interface for the specific contract before submitting any transaction.
 
 ### Yield-source/strategy failure (only if enabled for this deployment)
 
-The core deployment has no automatic external strategy selection. Use this
-playbook only when the deployment record confirms a configured yield source or
-an external strategy integration.
+The vault supports optional external strategy adapters. Use this playbook only
+when the deployment record confirms that an adapter or yield source is
+configured and funded.
 
 1. Confirm the affected source address, its allowlist status, current vault and
    source balances, and whether the failure affects principal or rewards.
-2. Stop new exposure through the integration's own control plane. Do not
-   remove an allowlisted source or request a withdrawal until the source
-   operator confirms the exact effects.
-3. Use `remove_yield_source(source)` to remove an untrusted source from future
-   authorized interactions when appropriate. If the integration supports
-   recovery, `withdraw_from_yield(admin, amount)` is the vault entrypoint for
-   authorized recovery; verify its code and source behavior before use.
-4. Pause the vault if accounting is uncertain or an active exploit is possible.
-   Reconcile returned assets against vault accounting before reopening.
+2. Stop new exposure by halting calls to `allocate_to_strategy(keeper, adapter,
+   amount)` and the integration's own control plane. Do not remove a configured
+   source or request a withdrawal until the source operator confirms the
+   effects.
+3. If recovery is approved, use `withdraw_from_strategy(admin, adapter,
+   amount)` for the adapter, or `withdraw_from_yield(admin, amount)` for the
+   legacy yield-source path. Verify the adapter implementation and returned
+   amount before reconciling vault accounting.
+4. Compare `get_strategies()`, `total_strategy_assets()`, and
+   `total_vault_assets()` with token balances. If accounting is uncertain or
+   an active exploit is possible, pause the vault and do not reopen until the
+   share-price impact is reviewed.
 
-**Functions:** `add_yield_source`, `remove_yield_source`, `withdraw_from_yield`,
-`pause`, `guardian_pause`, `is_paused`, `unpause`.
+**Functions:** `get_strategies`, `add_strategy`, `allocate_to_strategy`,
+`withdraw_from_strategy`, `total_strategy_assets`, `total_vault_assets`,
+`add_yield_source`, `remove_yield_source`, `withdraw_from_yield`, `pause`,
+`guardian_pause`, `is_paused`, `unpause`.
 
 ## Contacts and escalation roster template
 

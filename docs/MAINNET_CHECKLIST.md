@@ -29,8 +29,9 @@ deployment record.
 - [ ] Confirm the release branch contains only approved changes and that the
   deployed artifact is built from that exact commit.
 - [ ] Confirm version, contract interface, and network parameters; review
-  [`src/interface.rs`](../src/interface.rs) and the
-  [interface documentation](./INTERFACE.md).
+  [`src/interface.rs`](../src/interface.rs), the
+  [interface documentation](./INTERFACE.md), and the compile-time
+  [runbook interface snapshot](../src/test_runbook_interface_snapshot.rs).
 - [ ] Record unresolved issues and explicitly accept or block each one; include
   [#800](https://github.com/Rickyy1017/Stellar-Defi-Vault/issues/800),
   [#801](https://github.com/Rickyy1017/Stellar-Defi-Vault/issues/801),

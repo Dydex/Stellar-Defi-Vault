@@ -16,10 +16,10 @@ interface CursorState {
 }
 
 interface ContractEvent {
-  id: string;
+  cursor: string;
   ledger: number;
   topic: string[];
-  value: string;
+  value: unknown;
   txHash?: string;
 }
 
@@ -83,8 +83,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function decodeScVal(value: string): unknown {
-  return scValToNative(xdr.ScVal.fromXDR(value, "base64"));
+function decodeScVal(value: unknown): unknown {
+  const encoded = typeof value === "string" ? value : isRecord(value) ? value.xdr : undefined;
+  if (typeof encoded !== "string") {
+    throw new Error("RPC event contains a malformed ScVal");
+  }
+  return scValToNative(xdr.ScVal.fromXDR(encoded, "base64"));
 }
 
 function topicName(encoded: string): string {
@@ -136,7 +140,10 @@ function alertFor(event: ContractEvent): string | undefined {
       rule = "large_withdrawal";
       title = `Large withdrawal (${amount.toString()} token base units)`;
     }
-  } else if (enabledRules.has("fee_change") && ["token_fee_set", "fee_set", "fee_chg"].includes(name)) {
+  } else if (
+    enabledRules.has("fee_change") &&
+    ["token_fee_set", "fee_set", "fee_queued", "fee_apld", "fee_chg"].includes(name)
+  ) {
     rule = "fee_change";
     title = `Fee configuration changed: ${name}`;
   } else if (
@@ -232,18 +239,23 @@ async function fetchEvents(cursor: CursorState): Promise<EventsResult> {
   }
 
   const events = result.events.map((entry): ContractEvent => {
+    const eventCursor = isRecord(entry)
+      ? typeof entry.pagingToken === "string"
+        ? entry.pagingToken
+        : entry.id
+      : undefined;
     if (
       !isRecord(entry) ||
-      typeof entry.id !== "string" ||
+      typeof eventCursor !== "string" ||
       typeof entry.ledger !== "number" ||
       !Array.isArray(entry.topic) ||
       !entry.topic.every((topic) => typeof topic === "string") ||
-      typeof entry.value !== "string"
+      entry.value === undefined
     ) {
       throw new Error("RPC getEvents returned a malformed contract event");
     }
     return {
-      id: entry.id,
+      cursor: eventCursor,
       ledger: entry.ledger,
       topic: entry.topic,
       value: entry.value,
@@ -271,12 +283,12 @@ async function processPage(cursor: CursorState): Promise<boolean> {
   for (const event of page.events) {
     const alert = alertFor(event);
     if (alert) await sendAlert(alert);
-    cursor.cursor = event.id;
+    cursor.cursor = event.cursor;
     await saveCursor(cursor);
   }
 
   if (page.events.length === pageLimit && page.events.length > 0) {
-    cursor.cursor = page.events[page.events.length - 1].id;
+    cursor.cursor = page.events[page.events.length - 1].cursor;
     await saveCursor(cursor);
     return true;
   }
