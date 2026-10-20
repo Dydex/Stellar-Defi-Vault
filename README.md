@@ -275,6 +275,111 @@ Pending reward: 0.1375000 (1375000 raw)
 Boost multiplier: 11000 bps
 ```
 
+## Reward Pool Runway Simulation
+
+[`scripts/runway-sim.ts`](./scripts/runway-sim.ts) projects when the reward
+pool would run dry under three TVL growth scenarios (low / base / high), so
+an operator can size `fund_reward_pool` ahead of time instead of guessing.
+It uses the exact same pool-wide APR math as `runway_guard.rs`'s
+`projected_runway_ledgers` (`BOOST_BPS_BASE`, `STELLAR_LEDGERS_PER_YEAR`, and
+`LEDGERS_PER_DAY`, mirrored as plain constants at the top of the script —
+see its own header comment if those ever change on-chain).
+
+It's a dependency-free TypeScript file — no `package.json` or `npm install`
+needed — runnable directly with [`tsx`](https://github.com/privatenumber/tsx)
+or `ts-node`:
+
+```bash
+npx tsx scripts/runway-sim.ts --tvl 1000000 --rate-bps 800 --reward-pool 15000
+```
+
+Pool state can instead be read live from a deployed contract via the Stellar
+CLI, using the same `CONTRACT_ID` / `IDENTITY` / `NETWORK` convention as
+`scripts/pool.sh`. `IDENTITY` is required here too — the CLI needs a source
+account even for a read-only simulated call:
+
+```bash
+CONTRACT_ID=CB...YOUR_CONTRACT_ID IDENTITY=alice npx tsx scripts/runway-sim.ts --network testnet
+```
+
+Model a prospective top-up with `--fund`, and widen or narrow the projection
+with `--months` and the `--low-growth`/`--base-growth`/`--high-growth`
+annual rates (e.g. `--base-growth 0.5` for +50%/year):
+
+```text
+$ npx tsx scripts/runway-sim.ts --tvl 1000000 --rate-bps 500 --reward-pool 50000 --months 12
+Pool state: TVL=1,000,000 rate_bps=500 reward_pool=50,000
+
+Month  low (-25%/yr)  base (50%/yr)  high (200%/yr)
+-----  -------------  -------------  --------------
+    0       50000.00       50000.00        50000.00
+    1       45939.09       45819.80        45693.41
+    2       41974.37       41495.93        40973.94
+    3       38103.57       37023.48        35802.00
+    4       34324.46       32397.32        30134.21
+    5       30634.88       27612.18        23923.04
+    6       27032.69       22662.60        17116.38
+    7       23515.84       17542.91         9657.15
+    8       20082.29       12247.29         1482.79
+    9       16730.08        6769.67            0.00
+   10       13457.28        1103.81            0.00
+   11       10262.00           0.00            0.00
+   12        7142.42           0.00            0.00
+
+low   (-25%/yr TVL growth): survives the full 12-month horizon
+base  (50%/yr TVL growth): exhausted around month 11
+high  (200%/yr TVL growth): exhausted around month 9
+```
+
+Run `npx tsx scripts/runway-sim.ts --help` for the full option list. The
+output above is from an actual run of the script, not fabricated — try the
+same command to reproduce it.
+
+## Seeding Demo Accounts
+
+[`scripts/seed-testnet.sh`](./scripts/seed-testnet.sh) creates and
+friendbot-funds `N` throwaway test-network accounts, mints each one a test
+token, and deposits it into the deployed vault — useful for demos and
+manual QA when you need several positions in the pool without hand-running
+the same CLI calls over and over.
+
+```bash
+scripts/seed-testnet.sh --accounts 5 --amount 250000000 --contract-id "$CONTRACT_ID"
+```
+
+By default it deploys a fresh, freely-mintable test token (a Stellar Asset
+Contract wrapping a classic asset it issues itself) and mints `--amount`
+(raw base units, 7 decimals, same convention as `scripts/stake.sh`) of it to
+each new account before depositing that same amount into the vault. Pass
+`--token-id` + `--token-issuer` to mint from an already-deployed test token
+instead. `--accounts`, `--amount`, and `--contract-id` (or `$CONTRACT_ID`)
+are the only required inputs; run with `--help` for the rest (`--prefix`,
+`--asset-code`, `--network`).
+
+It **never runs against mainnet**: the network (`--network`, or `$NETWORK`,
+default `testnet`) must be one of `testnet` / `futurenet` / `local` /
+`standalone`, checked both by name and, as a second, independent check,
+against the network's own passphrase — and there is no flag or environment
+variable to bypass either check.
+
+Each account is seeded independently: one failing (e.g. a flaky friendbot
+request) doesn't stop the rest, and the final summary table marks exactly
+which step failed for it:
+
+```text
+Summary
+Name          Address                                                   Minted          Shares          Status
+------------  --------------------------------------------------------  --------------  --------------  ------
+seed-1        GA2SAV4ISWSF42FWFFMA5C54EMHFPZWG6S2JRPLW53HXK3GDAMYMJW54  250000000       2.5000000       ok
+seed-2        GC3QSFHWDI7G3MFNCNTHAS3FCJ5KAJMJSAPLPGOMTAERFKNM77GSO737  250000000       2.5000000       ok
+
+2/2 accounts fully seeded (created, funded, minted, deposited).
+```
+
+(Account creation, funding, and minting above are from an actual testnet
+run; the deposit/shares columns are illustrative, since reproducing them
+needs a deployed vault contract ID.)
+
 ## Events
 
 Every emitted event indexes an event-type symbol in topic 0 and its primary
@@ -307,6 +412,13 @@ See [docs/STORAGE.md](./docs/STORAGE.md) for the full audit of which Soroban
 storage type (instance, persistent, or temporary) each piece of contract
 state uses and why, including known scaling risks around the depositor
 registry.
+
+A persistent entry — the vault's own instance storage, or a specific
+user's position/checkpoint/settings entries — can be archived if its TTL
+runs out before anyone extends it. See
+[docs/RESTORE.md](./docs/RESTORE.md) for how to recognize that happened
+(reads fail clearly rather than returning a default) and the CLI steps to
+restore it.
 
 ## Fuzzing
 

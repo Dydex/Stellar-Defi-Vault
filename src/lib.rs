@@ -134,6 +134,12 @@ mod test_token_interface_compliance;
 #[cfg(test)]
 mod test_vec_storage_capacity;
 
+#[cfg(test)]
+mod test_error_codes;
+
+#[cfg(test)]
+mod test_restore_archived_entries;
+
 /// Pure math surfaces exposed for property tests and `cargo-fuzz` (issue #661).
 ///
 /// Gated so it never lands in the deployed WASM: the fuzz crate enables the
